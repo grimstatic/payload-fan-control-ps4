@@ -13,57 +13,43 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Checkout
+      - name: Checkout project
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            clang-18 \
-            lld-18 \
-            llvm-18 \
-            make \
-            git \
-            curl \
-            xz-utils \
-            ca-certificates
+          sudo apt-get install -y clang-18 lld-18 make wget unzip file binutils
 
-      - name: Checkout PS4 payload SDK
-        uses: actions/checkout@v4
-        with:
-          repository: ps4-payload-dev/sdk
-          ref: v0.9
-          path: .ps4-payload-sdk
-          fetch-depth: 1
-
-      - name: Install PS4 payload SDK
+      - name: Install PS4 payload SDK v0.9
         run: |
-          sudo make -C .ps4-payload-sdk install DESTDIR=/opt/ps4-payload-sdk
+          wget -q https://github.com/ps4-payload-dev/sdk/releases/download/v0.9/ps4-payload-sdk.zip
+          sudo unzip -q ps4-payload-sdk.zip -d /opt
+          test -d /opt/ps4-payload-sdk
           echo "PS4_PAYLOAD_SDK=/opt/ps4-payload-sdk" >> "$GITHUB_ENV"
 
-      - name: Show toolchain and SDK revision
+      - name: Show build environment
         run: |
           clang-18 --version
           ld.lld-18 --version
-          git -C .ps4-payload-sdk rev-parse --short HEAD
-          test -d "$PS4_PAYLOAD_SDK"
+          test -f "$PS4_PAYLOAD_SDK/toolchain/orbis.mk"
 
       - name: Build ELF
         run: |
-          make clean || true
+          make clean
           make
 
-      - name: Validate artifact
+      - name: Validate ELF
         run: |
           test -f fan_control.elf
           file fan_control.elf
+          readelf -h fan_control.elf
           ls -lh fan_control.elf
 
-      - name: Upload ELF artifact
+      - name: Upload ELF
         uses: actions/upload-artifact@v4
         with:
-          name: fan-control-payload
+          name: ps4-fan-control-payload
           path: fan_control.elf
           if-no-files-found: error
           retention-days: 30
