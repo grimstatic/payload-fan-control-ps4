@@ -1,12 +1,12 @@
 /*
- * PS4 Fan Control - GoldHEN AutoRun ELF
- * Target: PS4 / firmware 12.50-12.52
+ * PS4 Fan Control PayLoad
+ * Tested: PS4 / Firmware 12.52
  * SDK:    ps4-payload-dev/sdk
  *
  * Flow:
  *   1. Read the current /dev/icc_fan 10-byte PS4 threshold request.
  *   2. Log the raw bytes so the target console can be inspected.
- *   3. Load the threshold from /data/GoldHEN/fan_control.ini.
+ *   3. Load the threshold from /data/fan_control/fan_control.ini.
  *   4. Copy the original 10 bytes and change ONLY byte 5.
  *   5. Write the complete 10-byte request back.
  *   6. Read it again, log the raw bytes, and verify byte 5.
@@ -22,6 +22,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,10 +36,10 @@
 /* Configuration                                                              */
 /* -------------------------------------------------------------------------- */
 
-#define PAYLOAD_VERSION        "1.07-test"
+#define PAYLOAD_VERSION        "1.10"
 
-#define CONFIG_DIR             "/data/GoldHEN"
-#define CONFIG_FILE            "/data/GoldHEN/fan_control.ini"
+#define CONFIG_DIR             "/data/fan_control"
+#define CONFIG_FILE            "/data/fan_control/fan_control.ini"
 
 #define LOG_DIR                "/data/fan_control"
 #define LOG_FILE               "/data/fan_control/fan_control.log"
@@ -53,7 +54,7 @@
 
 #define ICC_FAN_DEVICE         "/dev/icc_fan"
 
-/* PS4 /dev/icc_fan threshold ioctls used by known PS4 payloads. */
+/* PS4 /dev/icc_fan threshold ioctls. */
 #define ICC_IOCTL_SET_THRESHOLD 0xC01C8F07UL
 #define ICC_IOCTL_GET_THRESHOLD 0xC01C8F08UL
 
@@ -65,7 +66,7 @@
 /* Notification                                                               */
 /* -------------------------------------------------------------------------- */
 
-/* Widely used PS4 SceNotificationRequest layout; total size = 0xC30. */
+/* SceNotificationRequest layout; total size = 0xC30. */
 typedef struct {
     int32_t  type;                 /* 0x00 */
     uint32_t req_id;               /* 0x04 */
@@ -94,7 +95,7 @@ extern int sceKernelSendNotificationRequest(int api,
 extern int sceKernelUsleep(unsigned int microseconds);
 
 /* -------------------------------------------------------------------------- */
-/* Small helpers                                                              */
+/* Small Helpers                                                              */
 /* -------------------------------------------------------------------------- */
 
 static void format_hex(const uint8_t *data, size_t length,
@@ -127,24 +128,24 @@ static int write_log(const char *status, const char *detail)
     FILE *file;
     time_t now;
     struct tm *utc;
-    int mkdir_rc;
+    int saved_errno;
 
-    /* /data should already exist on Orbis; create only our subdirectory. */
-    mkdir_rc = mkdir(LOG_DIR, 0777);
-    if (mkdir_rc < 0 && errno != EEXIST) {
-        /* Keep the failure visible to developers through stderr. */
+    /* Create the project log directory if needed. */
+    if (mkdir(LOG_DIR, 0777) < 0 && errno != EEXIST) {
+        saved_errno = errno;
         fprintf(stderr,
                 "[FanCtrl] mkdir(%s) failed: errno=%d\n",
-                LOG_DIR, errno);
-        return -1;
+                LOG_DIR, saved_errno);
     }
 
+    /* Keep the log in the fan_control folder only. */
     file = fopen(LOG_FILE, "a");
     if (!file) {
+        saved_errno = errno;
         fprintf(stderr,
                 "[FanCtrl] fopen(%s) failed: errno=%d\n",
-                LOG_FILE, errno);
-        return -1;
+                LOG_FILE, saved_errno);
+        return -saved_errno;
     }
 
     now = time(NULL);
@@ -162,7 +163,7 @@ static int write_log(const char *status, const char *detail)
                 status,
                 detail);
     } else {
-        fprintf(file, "[--:--:--] [%s] %s\n", status, detail);
+        fprintf(file, "[time unavailable] [%s] %s\n", status, detail);
     }
 
     fflush(file);
@@ -201,21 +202,24 @@ typedef enum {
     CONFIG_FROM_INI,
     CONFIG_CREATED,
     CONFIG_MISSING_KEY,
-    CONFIG_CLAMPED
+    CONFIG_CLAMPED,
+    CONFIG_INVALID,
+    CONFIG_FILE_ERROR
 } ConfigSource;
 
-static void create_default_config(void)
+static int create_default_config(void)
 {
     FILE *file;
 
-    (void)mkdir(CONFIG_DIR, 0777);
+    if (mkdir(CONFIG_DIR, 0777) < 0 && errno != EEXIST)
+        return -errno;
 
     file = fopen(CONFIG_FILE, "w");
     if (!file)
-        return;
+        return -errno;
 
     fprintf(file,
-            "# PS4 Fan Control\n"
+            "# PS4 Fan Control PayLoad\n"
             "# Temperature threshold in degrees Celsius.\n"
             "# Safe configuration range used by this payload: %d-%d C.\n"
             "# Default: %d C.\n"
@@ -225,7 +229,10 @@ static void create_default_config(void)
             DEFAULT_THRESHOLD_C,
             DEFAULT_THRESHOLD_C);
 
-    fclose(file);
+    if (fclose(file) != 0)
+        return -errno;
+
+    return 0;
 }
 
 static int read_threshold(ConfigSource *source, int *raw_value)
@@ -240,7 +247,11 @@ static int read_threshold(ConfigSource *source, int *raw_value)
 
     file = fopen(CONFIG_FILE, "r");
     if (!file) {
-        create_default_config();
+        int create_rc = create_default_config();
+        if (create_rc < 0) {
+            *source = CONFIG_FILE_ERROR;
+            return -1;
+        }
         return DEFAULT_THRESHOLD_C;
     }
 
@@ -257,16 +268,37 @@ static int read_threshold(ConfigSource *source, int *raw_value)
 
         if (strncmp(cursor, "threshold=", 10) == 0) {
             char *end;
-            long parsed = strtol(cursor + 10, &end, 10);
+            long parsed;
 
-            if (end == cursor + 10) {
+            errno = 0;
+            parsed = strtol(cursor + 10, &end, 10);
+
+            if (end == cursor + 10 || errno == ERANGE) {
                 value = -1;
-            } else {
-                value = (int)parsed;
                 found = 1;
+            } else {
+                while (*end == ' ' || *end == '\t' ||
+                       *end == '\r' || *end == '\n')
+                    end++;
+
+                if (*end != '\0' || parsed < INT_MIN || parsed > INT_MAX) {
+                    value = -1;
+                    found = 1;
+                } else {
+                    value = (int)parsed;
+                    found = 1;
+                }
             }
             break;
         }
+    }
+
+    if (ferror(file)) {
+        int saved_errno = errno ? errno : EIO;
+        fclose(file);
+        *source = CONFIG_FILE_ERROR;
+        *raw_value = -1;
+        return -saved_errno;
     }
 
     fclose(file);
@@ -277,6 +309,11 @@ static int read_threshold(ConfigSource *source, int *raw_value)
     }
 
     *raw_value = value;
+
+    if (value < 0) {
+        *source = CONFIG_INVALID;
+        return DEFAULT_THRESHOLD_C;
+    }
 
     if (value < MIN_THRESHOLD_C || value > MAX_THRESHOLD_C) {
         *source = CONFIG_CLAMPED;
@@ -294,17 +331,19 @@ static const char *config_source_name(ConfigSource source)
         case CONFIG_CREATED:    return "ini created";
         case CONFIG_MISSING_KEY:return "default";
         case CONFIG_CLAMPED:    return "ini clamped";
+        case CONFIG_INVALID:   return "ini invalid";
+        case CONFIG_FILE_ERROR:return "config error";
         default:                return "unknown";
     }
 }
 
 /* -------------------------------------------------------------------------- */
-/* ICC helpers                                                                */
+/* ICC Helpers                                                                */
 /* -------------------------------------------------------------------------- */
 
 static int icc_open(void)
 {
-    /* The PS4 fan device is commonly opened read-only by working payloads. */
+    /* The PS4 fan device is commonly opened read-only. */
     return open(ICC_FAN_DEVICE, O_RDONLY, 0);
 }
 
@@ -371,15 +410,20 @@ int main(void)
 
     printf("[FanCtrl] Starting v%s\n", PAYLOAD_VERSION);
 
+    /* Always record that the payload started, even if a later step fails. */
+    write_log("START", "----------------------------------------");
+    write_log("START", "Fan Control Payload Loaded");
+
     /* 1. Read the existing ICC profile. */
     rc = icc_get_profile(initial_profile);
     if (rc < 0) {
         snprintf(detail, sizeof(detail),
-                 "GET autoservo failed: rc=%d errno=%d",
-                 rc, -rc);
+                 "Failed to read /dev/icc_fan: rc=%d errno=%d (%s)",
+                 rc, -rc, strerror(-rc));
         printf("[FanCtrl] %s\n", detail);
         write_log("FAIL", detail);
-        notify_user("Fan Threshold: ERROR - ICC read failed");
+        write_log("END", "Payload stopped before changing the fan threshold");
+        notify_user("Fan Control Payload: ERROR - ICC read failed");
         return 1;
     }
 
@@ -396,9 +440,35 @@ int main(void)
 
     /* 2. Load the target from the INI file. */
     new_threshold = read_threshold(&source, &raw_value);
+    if (new_threshold < MIN_THRESHOLD_C || new_threshold > MAX_THRESHOLD_C) {
+        snprintf(detail, sizeof(detail),
+                 "Failed to load a valid threshold from %s; using no fan write",
+                 CONFIG_FILE);
+        printf("[FanCtrl] %s\n", detail);
+        write_log("FAIL", detail);
+        write_log("END", "Payload stopped because configuration could not be loaded");
+        notify_user("Fan Control Payload: ERROR - config load failed");
+        return 1;
+    }
+
     printf("[FanCtrl] Target threshold: %dC (%s)\n",
            new_threshold,
            config_source_name(source));
+
+    if (source == CONFIG_CREATED)
+        write_log("INFO", "Configuration file was missing; created with the default threshold");
+    else if (source == CONFIG_MISSING_KEY)
+        write_log("WARN", "Configuration file has no threshold= entry; using the default threshold");
+    else if (source == CONFIG_INVALID)
+        write_log("FAIL", "Configuration threshold is not a valid integer; using the default threshold");
+    else if (source == CONFIG_CLAMPED)
+        write_log("WARN", "Configuration threshold was outside the allowed 60-80C range; using the default threshold");
+    else if (raw_value >= 0) {
+        snprintf(detail, sizeof(detail),
+                 "Configuration loaded: threshold=%dC",
+                 raw_value);
+        write_log("INFO", detail);
+    }
 
     /* 3. Avoid an unnecessary write when the value is already correct. */
     if (old_threshold != new_threshold) {
@@ -416,24 +486,28 @@ int main(void)
         rc = icc_set_profile(profile);
         if (rc < 0) {
             snprintf(detail, sizeof(detail),
-                     "SET autoservo failed: rc=%d errno=%d; unchanged at %dC",
-                     rc, -rc, old_threshold);
+                     "Failed to write /dev/icc_fan: rc=%d errno=%d (%s); threshold remains %dC",
+                     rc, -rc, strerror(-rc), old_threshold);
             printf("[FanCtrl] %s\n", detail);
             write_log("FAIL", detail);
-            notify_user("Fan Threshold: ERROR - write failed");
+            write_log("END", "Payload stopped after ICC write failure");
+            notify_user("Fan Control Payload: ERROR - write failed");
             return 1;
         }
+    } else {
+        write_log("INFO", "Requested threshold matches the current threshold; skipped SET ioctl");
     }
 
     /* 4. Read back the profile and verify the threshold. */
     rc = icc_get_profile(verify_profile);
     if (rc < 0) {
         snprintf(detail, sizeof(detail),
-                 "Verification GET failed: rc=%d errno=%d; write was attempted",
-                 rc, -rc);
+                 "Verification read failed: rc=%d errno=%d (%s); a write may have occurred",
+                 rc, -rc, strerror(-rc));
         printf("[FanCtrl] %s\n", detail);
-        write_log("WARN", detail);
-        notify_user("Fan Threshold: WARNING - verify read failed");
+        write_log("FAIL", detail);
+        write_log("END", "Payload stopped because verification could not complete");
+        notify_user("Fan Control Payload: ERROR - verify read failed");
         return 1;
     }
 
@@ -447,25 +521,26 @@ int main(void)
 
     if (verify_threshold != new_threshold) {
         snprintf(detail, sizeof(detail),
-                 "Verification mismatch: wanted %dC, ICC reports %dC",
+                 "Verification failed: requested %dC but ICC reports %dC",
                  new_threshold, verify_threshold);
         printf("[FanCtrl] %s\n", detail);
-        write_log("WARN", detail);
-        notify_user("Fan Threshold: WARNING - value did not verify");
+        write_log("FAIL", detail);
+        write_log("END", "Payload finished with verification failure");
+        notify_user("Fan Control Payload: ERROR - value did not verify");
         return 1;
     }
 
-    /* 5. Log the successful result. */
+    /* 5. Successful result. */
     if (raw_value >= 0) {
         snprintf(detail, sizeof(detail),
-                 "Applied %dC (was %dC) | source=%s | ini=%dC",
+                 "SUCCESS: fan threshold is %dC (was %dC) | source=%s | ini=%dC",
                  new_threshold,
                  old_threshold,
                  config_source_name(source),
                  raw_value);
     } else {
         snprintf(detail, sizeof(detail),
-                 "Applied %dC (was %dC) | source=%s",
+                 "SUCCESS: fan threshold is %dC (was %dC) | source=%s",
                  new_threshold,
                  old_threshold,
                  config_source_name(source));
@@ -474,13 +549,14 @@ int main(void)
     printf("[FanCtrl] %s\n", detail);
     write_log("OK", detail);
 
-    /* 6. Notify the user. */
     snprintf(message, sizeof(message),
              "Fan Threshold: %dC set | was %dC",
              new_threshold,
              old_threshold);
     notify_user(message);
 
-    /* 7. GoldHEN/ELF runtime returns from main and handles process exit. */
+    write_log("END", "Fan Control Payload Completed Successfully");
+    write_log("END", "----------------------------------------");
+
     return 0;
 }
