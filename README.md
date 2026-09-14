@@ -16,7 +16,7 @@ This was tested on PS4 Pro CUH-7106B / firmware 12.52 / Only PS4 I have
 6. Logs the results and shows a notification.
 7. Exits.
 
-## Logging
+## Config
 The payload automatically creates fan_control.ini located:
 
 ```text
