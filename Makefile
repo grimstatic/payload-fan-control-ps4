@@ -1,4 +1,4 @@
-# PS4 Fan Control - SDK build
+# PS4 Fan Control PayLoad - SDK build
 # Requires ps4-payload-dev/sdk (v0.9 or newer) installed.
 
 PS4_HOST ?= ps4
@@ -26,4 +26,4 @@ clean:
 	rm -f $(PAYLOAD) *.o
 
 test: $(PAYLOAD)
-	echo "$(USER)" | $(PS4_DEPLOY) -i -h $(PS4_HOST) -p $(PS4_PORT) $(PAYLOAD)
+	$(PS4_DEPLOY) -h $(PS4_HOST) -p $(PS4_PORT) $(PAYLOAD)
