@@ -1,47 +1,49 @@
-# PS4 Fan Control — GoldHEN AutoRun ELF
+# PS4 Fan Control Payload
 
-Target: **PS4 Pro CUH-7106B / firmware 12.52**
+A small **ELF payload** for testing the PS4 `/dev/icc_fan` temperature threshold.
 
-SDK: **ps4-payload-dev/sdk v0.9+**
+**Target:** PS4 Pro CUH-7106B / firmware 12.52 / Only PS4 I have
+**SDK:** `ps4-payload-dev/sdk` v0.9+
 
-## Purpose
+## What it does
 
-This is a small test-oriented ELF payload for the PS4 `/dev/icc_fan` threshold interface.
+The payload:
 
-It changes the **fan temperature threshold** used by the ICC autoservo. It is **not** a direct RPM/PWM controller.
+1. Reads the current fan setting.
+2. Reads `fan_control.ini`.
+3. Changes only the temperature value at byte 5.
+4. Writes the setting back.
+5. Reads it again to verify the change.
+6. Logs the results and shows a notification.
+7. Exits.
 
-## Test flow
+It changes the **temperature threshold used by the PS4's fan controller**. It is not a direct RPM/PWM controller.
+
+## Simple flow
 
 ```text
 GoldHEN AutoRun
-      |
-      v
-GET /dev/icc_fan (10-byte PS4 request)
-      |
-      v
-Log the raw 10 bytes
-      |
-      v
-Read /data/GoldHEN/fan_control.ini
-      |
-      v
-Copy the GET result and change ONLY byte 5
-      |
-      v
-SET the 10-byte request
-      |
-      v
+      ↓
+GET current ICC data
+      ↓
+Read fan_control.ini
+      ↓
+Change byte 5 only
+      ↓
+SET ICC data
+      ↓
 GET again
-      |
-      v
-Log the raw 10 bytes again
-      |
-      +---- mismatch/error ----> log + notification + exit
-      |
-      +---- verified ----------> log + notification + exit
+      ↓
+Verify
+   ↙      ↘
+ FAIL      OK
+  ↓         ↓
+log       log
+ +        +
+notify   notify
+  ↓         ↓
+exit      exit
 ```
-
-This intentionally uses the **10-byte PS4 request** documented by established PS4 fan-threshold payloads. The temperature in Celsius is stored at **byte 5**.
 
 ## Files on the PS4
 
@@ -51,48 +53,35 @@ This intentionally uses the **10-byte PS4 request** documented by established PS
 /data/fan_control/fan_control.log
 ```
 
-On first run, the INI is created automatically:
+The INI is created automatically on first run:
 
 ```ini
 threshold=65
 ```
 
-The payload accepts **60–80 °C**. Values outside that range fall back to 65 °C.
+Allowed range: **60–80°C**. Values outside the range fall back to 65°C.
 
 ## Logging
 
-Yes — logging is implemented.
-
-The payload appends to:
+The payload automatically creates the log directory and writes to:
 
 ```text
 /data/fan_control/fan_control.log
 ```
 
-The test build logs:
+the log includes:
 
-- the initial raw ICC GET bytes
-- the threshold read from byte 5
-- the exact 10 bytes that will be sent by SET
-- the raw ICC GET bytes after the write
-- verification success/mismatch
-- configuration source and old/new thresholds
-- failures and warnings
-
-Example:
-
-```text
-[2026-09-14 04:30:12] [READ] ICC GET raw (10 bytes): 00 00 00 00 00 4F 00 00 00 08 | threshold=79C
-[2026-09-14 04:30:12] [WRITE] ICC SET raw (10 bytes): 00 00 00 00 00 41 00 00 00 08 | threshold=65C
-[2026-09-14 04:30:12] [VERIFY] ICC VERIFY raw (10 bytes): 00 00 00 00 00 41 00 00 00 08 | threshold=65C
-[2026-09-14 04:30:12] [OK] Applied 65C (was 79C) | source=ini | ini=65C
-```
-
-The raw-byte logging is intentional for the first physical 12.52 test. It lets us compare what the CUH-7106B actually reports before and after the change.
+- raw ICC data before the change
+- the current threshold
+- the exact data sent to SET
+- raw ICC data after the change
+- verification result
+- configuration source
+- errors and warnings
 
 ## Build
 
-Use the current `ps4-payload-dev/sdk` release (v0.9 or newer) and set:
+Install `ps4-payload-dev/sdk` v0.9 or newer and set:
 
 ```sh
 export PS4_PAYLOAD_SDK=/opt/ps4-payload-sdk
@@ -111,10 +100,41 @@ Output:
 fan_control.elf
 ```
 
-The project uses the SDK's normal CRT/libc and `toolchain/orbis.mk` rather than a handwritten `_start()`.
+The project uses the SDK's normal CRT/libc and `toolchain/orbis.mk`.
 
-## Important test note
+## GitHub Actions
 
-This project deliberately does **not** claim that the exact `/dev/icc_fan` behavior on **CUH-7106B / Orbis 12.52** has been independently verified.
+A GitHub Actions workflow is included in:
 
-The first physical run should be treated as a diagnostic test. Check `fan_control.log` after the run and inspect the raw 10-byte GET result.
+```text
+.github/workflows/build.yml
+```
+
+Push the project to GitHub, open **Actions**, run the build, and download the generated `fan_control.elf` from the workflow artifacts.
+
+## Credits
+
+This project uses ideas, research, and tooling from the PS4 homebrew community:
+
+- **Scene-Collective** — `ps4-fan-threshold`  
+  https://github.com/Scene-Collective/ps4-fan-threshold
+
+- **Zer0xFF** — PS4/PS4 Pro ICC and fan-control research  
+  https://gist.github.com/Zer0xFF/4aa38d836a5696ed1b6486bb8e782b4a
+
+- **ps4-payload-dev contributors** — PS4 payload SDK  
+  https://github.com/ps4-payload-dev/sdk
+
+- **ps4-payload-dev contributors** — `elfldr`  
+  https://github.com/ps4-payload-dev/elfldr
+
+- **GoldHEN contributors** — GoldHEN payload environment  
+  https://github.com/GoldHEN/GoldHEN
+
+Please see the original projects for their licenses and attribution requirements.
+
+## Important
+
+This is a **test build**. The project does not claim that the exact `/dev/icc_fan` behavior on every CUH-7106B running 12.52 has been independently verified.
+
+Check `fan_control.log` after the first run and review the raw ICC data before using the payload regularly.
