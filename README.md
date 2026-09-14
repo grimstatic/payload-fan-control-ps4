@@ -17,6 +17,21 @@ This was tested on PS4 Pro CUH-7106B / firmware 12.52 / Only PS4 I have
 7. Exits.
 
 ## Logging
+The payload automatically creates fan_control.ini located:
+
+```text
+/data/fan_control/fan_control.ini
+```
+```text
+# PS4 Fan Control
+# Temperature threshold in degrees Celsius.
+# Safe configuration range used by this payload: 60-80 C.
+# Default: 65 C.
+threshold=65
+```
+
+
+## Logging
 The payload automatically creates the log directory and writes to:
 
 ```text
