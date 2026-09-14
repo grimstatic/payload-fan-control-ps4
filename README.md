@@ -1,6 +1,6 @@
 # PS4 Fan Control Payload
 
-A small **ELF payload** for testing the PS4 `/dev/icc_fan` temperature threshold.
+An **ELF** alternative to **PS4 Temperature** by Lapy, LM, Zeco, AlAzif, Zer0xFF
 
 **SDK:** `ps4-payload-dev/sdk` v0.9+
 
