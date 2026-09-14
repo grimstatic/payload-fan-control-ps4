@@ -1,4 +1,4 @@
-name: Build PS4 Fan Control ELF
+name: Build PS4 Fan Control PayLoad
 
 on:
   push:
@@ -63,7 +63,7 @@ jobs:
       - name: Upload ELF artifact
         uses: actions/upload-artifact@v4
         with:
-          name: fan-control-12.52-test
+          name: fan-control-payload
           path: fan_control.elf
           if-no-files-found: error
           retention-days: 30
