@@ -7,10 +7,7 @@ An **ELF** alternative to **PS4 Temperature** by Lapy, LM, Zeco, AlAzif, Zer0xFF
 ## Important
 This was tested on PS4 Pro CUH-7106B / firmware 12.52 / Only PS4 I have
 
-## What it does
-
-The payload:
-
+## How it works
 1. Reads the current fan setting.
 2. Reads `fan_control.ini`.
 3. Changes only the temperature value at byte 5.
@@ -20,7 +17,6 @@ The payload:
 7. Exits.
 
 ## Logging
-
 The payload automatically creates the log directory and writes to:
 
 ```text
@@ -40,7 +36,6 @@ The log records:
 - raw ICC bytes before and after a write
 
 ## To Build
-
 Install `ps4-payload-dev/sdk` v0.9 or newer and set:
 
 ```sh
@@ -56,7 +51,6 @@ make
 The project uses the SDK's normal CRT/libc and `toolchain/orbis.mk`.
 
 ## Credits
-
 This project uses ideas, research, and tooling from the PS4 homebrew community:
 
 - **Scene-Collective** — `ps4-fan-threshold`  
@@ -74,5 +68,3 @@ This project uses ideas, research, and tooling from the PS4 homebrew community:
 - **GoldHEN contributors** — GoldHEN payload environment  
 
 Please see the original projects for their licenses and attribution requirements.
-
-## Important
