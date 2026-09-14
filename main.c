@@ -127,12 +127,25 @@ static int write_log(const char *status, const char *detail)
     FILE *file;
     time_t now;
     struct tm *utc;
+    int mkdir_rc;
 
-    (void)mkdir(LOG_DIR, 0777);
+    /* /data should already exist on Orbis; create only our subdirectory. */
+    mkdir_rc = mkdir(LOG_DIR, 0777);
+    if (mkdir_rc < 0 && errno != EEXIST) {
+        /* Keep the failure visible to developers through stderr. */
+        fprintf(stderr,
+                "[FanCtrl] mkdir(%s) failed: errno=%d\n",
+                LOG_DIR, errno);
+        return -1;
+    }
 
     file = fopen(LOG_FILE, "a");
-    if (!file)
+    if (!file) {
+        fprintf(stderr,
+                "[FanCtrl] fopen(%s) failed: errno=%d\n",
+                LOG_FILE, errno);
         return -1;
+    }
 
     now = time(NULL);
     utc = gmtime(&now);
@@ -152,6 +165,7 @@ static int write_log(const char *status, const char *detail)
         fprintf(file, "[--:--:--] [%s] %s\n", status, detail);
     }
 
+    fflush(file);
     fclose(file);
     return 0;
 }
