@@ -17,11 +17,12 @@ This was tested on PS4 Pro CUH-7106B / firmware 12.52 / Only PS4 I have
 7. Exits.
 
 ## Config
-The payload automatically creates fan_control.ini located:
+The payload automatically creates fan_control.ini where you can change the threshold to your liking
 
 ```text
 /data/fan_control/fan_control.ini
 ```
+
 ```text
 # PS4 Fan Control
 # Temperature threshold in degrees Celsius.
