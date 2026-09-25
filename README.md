@@ -25,9 +25,8 @@ The payload automatically creates fan_control.ini:
 Threshold can be change from 60 - 80
 ```text
 # PS4 Fan Control
-# Temperature threshold in degrees Celsius.
-# Safe configuration range used by this payload: 60-80 C.
-# Default: 65 C.
+# valid range: 60-80 C  (anything outside gets clamped to default)
+# lower = quieter, higher = hotter before ramp
 threshold=65
 ```
 
